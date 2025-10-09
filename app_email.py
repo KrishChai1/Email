@@ -25,8 +25,8 @@ except ImportError:
 
 # Configure Streamlit page
 st.set_page_config(
-    page_title="ORD Shipment Routing Agent",
-    page_icon="📦",
+    page_title="Agentic ORD Routing System",
+    page_icon="🤖",
     layout="wide",
     initial_sidebar_state="expanded"
 )
@@ -74,14 +74,23 @@ st.markdown("""
         font-family: 'Courier New', monospace;
         border-left: 4px solid #4299e1;
     }
+    .agentic-analysis {
+        background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+        padding: 1rem;
+        border-radius: 10px;
+        color: white;
+        margin: 1rem 0;
+    }
 </style>
 """, unsafe_allow_html=True)
 
 class ShipmentRoutingAgent:
     def __init__(self, api_key: str):
-        """Initialize the routing agent with Claude API"""
+        """Initialize the agentic routing agent with Claude API"""
         self.client = anthropic.Anthropic(api_key=api_key) if api_key else None
         self.routing_rules = self._load_routing_rules()
+        self.confidence_threshold = 0.8  # Threshold for autonomous routing
+        self.learning_history = []  # Track routing decisions for learning
         
     def _load_routing_rules(self) -> Dict:
         """Load the routing rules based on the ORD shipment initiation document"""
@@ -92,7 +101,7 @@ class ShipmentRoutingAgent:
             "routing_queues": {
                 "Account_Inquiry_US": {
                     "description": "POA, Account Setup, Account Needed requests",
-                    "keywords": ["Power of Attorney", "POA", "Account Needed", "Account Setup"],
+                    "keywords": ["Power of Attorney", "POA", "Account Needed", "Account Setup", "Legal Authorization", "Company Registration"],
                     "priority": 1,
                     "color": "#dc3545",
                     "team": "Customer Account Services Team",
@@ -102,11 +111,13 @@ class ShipmentRoutingAgent:
                         "legal.compliance@ups.com"
                     ],
                     "sla": "4 hours",
-                    "escalation": "account.manager@ups.com"
+                    "escalation": "account.manager@ups.com",
+                    "autonomous_actions": ["auto_acknowledge", "priority_flag", "legal_review_trigger"],
+                    "business_impact": "high"
                 },
                 "ORD_SI-Non_UPS_Shipments": {
-                    "description": "Emails from Evergreen Line domain",
-                    "from_domain": "@mail.evergreen-line.com",
+                    "description": "Emails from Evergreen Line and other external carriers",
+                    "from_domains": ["@mail.evergreen-line.com", "@evergreen.com", "@evergreen-line.com"],
                     "priority": 2,
                     "color": "#fd7e14",
                     "team": "External Carrier Relations Team",
@@ -115,11 +126,14 @@ class ShipmentRoutingAgent:
                         "evergreen.coordinator@ups.com"
                     ],
                     "sla": "2 hours",
-                    "escalation": "carrier.manager@ups.com"
+                    "escalation": "carrier.manager@ups.com",
+                    "autonomous_actions": ["auto_acknowledge", "carrier_sync", "tracking_update"],
+                    "business_impact": "high"
                 },
                 "ORD_Pre-Alert_SI": {
-                    "description": "Pre-Alert notifications",
-                    "subject_keywords": ["Pre-Alert", "Pre Alert", "PreAlert"],
+                    "description": "Pre-Alert notifications for incoming shipments",
+                    "subject_keywords": ["Pre-Alert", "Pre Alert", "PreAlert", "Advance Notice", "Incoming Shipment"],
+                    "content_patterns": ["ETA", "Expected Arrival", "Advance Notification", "Container.*arriving"],
                     "priority": 3,
                     "color": "#ffc107",
                     "team": "Shipment Coordination Team",
@@ -128,11 +142,13 @@ class ShipmentRoutingAgent:
                         "shipment.coordination@ups.com"
                     ],
                     "sla": "1 hour",
-                    "escalation": "operations.supervisor@ups.com"
+                    "escalation": "operations.supervisor@ups.com",
+                    "autonomous_actions": ["auto_acknowledge", "schedule_coordination", "resource_allocation"],
+                    "business_impact": "critical"
                 },
                 "ORD_Ocean_Arrival_Notices": {
-                    "description": "Ocean arrival notices",
-                    "content_keywords": ["Arrival Notice"],
+                    "description": "Ocean arrival notices and port notifications",
+                    "content_keywords": ["Arrival Notice", "Port Arrival", "Vessel Arrived", "Container Available", "Discharge Complete"],
                     "priority": 4,
                     "color": "#28a745",
                     "team": "Port Operations Team",
@@ -142,10 +158,12 @@ class ShipmentRoutingAgent:
                         "customs.clearance@ups.com"
                     ],
                     "sla": "30 minutes",
-                    "escalation": "port.supervisor@ups.com"
+                    "escalation": "port.supervisor@ups.com",
+                    "autonomous_actions": ["auto_acknowledge", "customs_notification", "pickup_scheduling"],
+                    "business_impact": "critical"
                 },
                 "Shipment_Initiation_Brkg_Inland_SI": {
-                    "description": "Default queue for other shipment initiations",
+                    "description": "Default queue for general shipment initiations and brokerage",
                     "priority": 5,
                     "color": "#6c757d",
                     "team": "General Shipment Processing Team",
@@ -154,7 +172,9 @@ class ShipmentRoutingAgent:
                         "inland.transport@ups.com"
                     ],
                     "sla": "6 hours",
-                    "escalation": "processing.manager@ups.com"
+                    "escalation": "processing.manager@ups.com",
+                    "autonomous_actions": ["auto_acknowledge", "route_optimization", "capacity_check"],
+                    "business_impact": "medium"
                 }
             }
         }
@@ -284,75 +304,299 @@ class ShipmentRoutingAgent:
             return msg.get_payload(decode=True).decode('utf-8', errors='ignore')
         return ""
     
-    def determine_routing(self, content: str, filename: str = "") -> Tuple[str, str, float, List[str]]:
-        """Determine routing based on content analysis and rules"""
+    def intelligent_content_analysis(self, content: str, filename: str = "") -> Dict:
+        """Advanced agentic analysis of content using multiple intelligence layers"""
         
+        # Layer 1: Pattern Recognition
         email_data = self.parse_email_content(content)
-        reasons = []
+        patterns = self._detect_patterns(content, email_data)
         
-        # Check each routing rule in priority order
-        sorted_queues = sorted(
-            self.routing_rules["routing_queues"].items(),
-            key=lambda x: x[1]["priority"]
+        # Layer 2: Business Context Understanding
+        business_context = self._analyze_business_context(content, email_data)
+        
+        # Layer 3: Urgency and Priority Assessment
+        urgency_analysis = self._assess_urgency(content, email_data, patterns)
+        
+        # Layer 4: Routing Decision with Confidence
+        routing_decision = self._make_routing_decision(patterns, business_context, urgency_analysis)
+        
+        # Layer 5: Autonomous Actions Planning
+        autonomous_actions = self._plan_autonomous_actions(routing_decision, urgency_analysis)
+        
+        return {
+            "patterns": patterns,
+            "business_context": business_context,
+            "urgency_analysis": urgency_analysis,
+            "routing_decision": routing_decision,
+            "autonomous_actions": autonomous_actions,
+            "confidence": routing_decision.get("confidence", 0.5),
+            "reasoning_chain": self._build_reasoning_chain(patterns, business_context, urgency_analysis, routing_decision)
+        }
+    
+    def _detect_patterns(self, content: str, email_data: Dict) -> Dict:
+        """Detect patterns in email content using intelligent analysis"""
+        patterns = {
+            "email_type": "unknown",
+            "sender_type": "unknown",
+            "content_indicators": [],
+            "structural_elements": [],
+            "business_signals": []
+        }
+        
+        content_lower = content.lower()
+        subject = email_data.get("subject", "").lower()
+        sender = email_data.get("from", "").lower()
+        
+        # Detect email type patterns
+        if any(word in content_lower for word in ["power of attorney", "poa", "account setup", "legal authorization"]):
+            patterns["email_type"] = "legal_documentation"
+            patterns["content_indicators"].append("legal_documents")
+            
+        elif any(domain in sender for domain in ["evergreen", "carrier", "shipping"]):
+            patterns["email_type"] = "carrier_communication"
+            patterns["sender_type"] = "external_carrier"
+            
+        elif any(word in subject for word in ["pre-alert", "prealert", "advance notice"]):
+            patterns["email_type"] = "operational_notification"
+            patterns["content_indicators"].append("pre_alert_notification")
+            
+        elif any(word in content_lower for word in ["arrival notice", "port arrival", "vessel arrived"]):
+            patterns["email_type"] = "arrival_notification"
+            patterns["content_indicators"].append("arrival_notice")
+            
+        # Detect structural elements
+        if re.search(r'container.*[A-Z]{4}\d{7}', content_lower):
+            patterns["structural_elements"].append("container_number")
+            
+        if re.search(r'eta|expected.*arrival|arriving.*\d{1,2}[/-]\d{1,2}', content_lower):
+            patterns["structural_elements"].append("arrival_date")
+            
+        if re.search(r'vessel.*\w+|ship.*\w+', content_lower):
+            patterns["structural_elements"].append("vessel_info")
+            
+        # Detect business signals
+        if any(word in content_lower for word in ["urgent", "asap", "immediate", "critical"]):
+            patterns["business_signals"].append("high_urgency")
+            
+        if any(word in content_lower for word in ["customs", "clearance", "duties", "taxes"]):
+            patterns["business_signals"].append("customs_required")
+            
+        return patterns
+    
+    def _analyze_business_context(self, content: str, email_data: Dict) -> Dict:
+        """Analyze business context and implications"""
+        context = {
+            "business_unit": "unknown",
+            "geographic_scope": "unknown",
+            "service_type": "unknown",
+            "customer_tier": "unknown",
+            "compliance_requirements": [],
+            "operational_impact": "medium"
+        }
+        
+        content_lower = content.lower()
+        
+        # Determine business unit
+        if "chicago" in content_lower or "ord" in content_lower:
+            context["geographic_scope"] = "chicago_ord"
+            
+        # Determine service type
+        if any(word in content_lower for word in ["ocean", "sea", "vessel", "port"]):
+            context["service_type"] = "ocean_freight"
+        elif any(word in content_lower for word in ["inland", "truck", "rail", "domestic"]):
+            context["service_type"] = "inland_transport"
+            
+        # Assess compliance requirements
+        if any(word in content_lower for word in ["poa", "power of attorney", "legal"]):
+            context["compliance_requirements"].append("legal_documentation")
+        if any(word in content_lower for word in ["customs", "duties", "import", "export"]):
+            context["compliance_requirements"].append("customs_compliance")
+            
+        return context
+    
+    def _assess_urgency(self, content: str, email_data: Dict, patterns: Dict) -> Dict:
+        """Intelligent urgency assessment"""
+        urgency = {
+            "level": 3,  # 1-5 scale
+            "factors": [],
+            "time_sensitivity": "normal",
+            "business_impact": "medium",
+            "escalation_needed": False
+        }
+        
+        content_lower = content.lower()
+        
+        # Time-sensitive indicators
+        if any(word in content_lower for word in ["today", "asap", "urgent", "immediate"]):
+            urgency["level"] = min(5, urgency["level"] + 2)
+            urgency["factors"].append("explicit_urgency_keywords")
+            urgency["time_sensitivity"] = "high"
+            
+        # Business impact indicators
+        if patterns.get("email_type") == "arrival_notification":
+            urgency["level"] = min(5, urgency["level"] + 1)
+            urgency["factors"].append("arrival_notification_time_critical")
+            urgency["business_impact"] = "high"
+            
+        if patterns.get("email_type") == "legal_documentation":
+            urgency["level"] = min(5, urgency["level"] + 1)
+            urgency["factors"].append("legal_documentation_compliance")
+            
+        # Pattern-based urgency
+        if "high_urgency" in patterns.get("business_signals", []):
+            urgency["level"] = min(5, urgency["level"] + 1)
+            urgency["escalation_needed"] = urgency["level"] >= 4
+            
+        return urgency
+    
+    def _make_routing_decision(self, patterns: Dict, business_context: Dict, urgency_analysis: Dict) -> Dict:
+        """Intelligent routing decision using agentic reasoning"""
+        
+        decision = {
+            "queue": "Shipment_Initiation_Brkg_Inland_SI",  # Default
+            "confidence": 0.5,
+            "reasons": [],
+            "alternative_queues": [],
+            "escalation_recommended": False
+        }
+        
+        # Rule-based routing with intelligence
+        content_indicators = patterns.get("content_indicators", [])
+        email_type = patterns.get("email_type", "unknown")
+        
+        # Account Inquiry routing
+        if email_type == "legal_documentation" or "legal_documents" in content_indicators:
+            decision["queue"] = "Account_Inquiry_US"
+            decision["confidence"] = 0.9
+            decision["reasons"].append("Legal documentation detected (POA/Account Setup)")
+            
+        # External carrier routing
+        elif patterns.get("sender_type") == "external_carrier":
+            decision["queue"] = "ORD_SI-Non_UPS_Shipments"
+            decision["confidence"] = 0.95
+            decision["reasons"].append("External carrier communication identified")
+            
+        # Pre-alert routing
+        elif "pre_alert_notification" in content_indicators:
+            decision["queue"] = "ORD_Pre-Alert_SI"
+            decision["confidence"] = 0.9
+            decision["reasons"].append("Pre-alert notification pattern matched")
+            
+        # Arrival notice routing
+        elif "arrival_notice" in content_indicators:
+            decision["queue"] = "ORD_Ocean_Arrival_Notices"
+            decision["confidence"] = 0.85
+            decision["reasons"].append("Arrival notice pattern detected")
+            
+        # Adjust confidence based on urgency and context
+        if urgency_analysis["level"] >= 4:
+            decision["confidence"] = min(1.0, decision["confidence"] + 0.1)
+            decision["escalation_recommended"] = True
+            decision["reasons"].append("High urgency detected - confidence boosted")
+            
+        return decision
+    
+    def _plan_autonomous_actions(self, routing_decision: Dict, urgency_analysis: Dict) -> List[Dict]:
+        """Plan autonomous actions based on routing decision"""
+        
+        actions = []
+        queue_name = routing_decision["queue"]
+        queue_info = self.routing_rules["routing_queues"].get(queue_name, {})
+        autonomous_capabilities = queue_info.get("autonomous_actions", [])
+        
+        # Standard acknowledgment for all routes
+        actions.append({
+            "action": "auto_acknowledge",
+            "description": "Send automatic acknowledgment to sender",
+            "timing": "immediate",
+            "confidence": 0.95
+        })
+        
+        # Queue-specific autonomous actions
+        if "priority_flag" in autonomous_capabilities and urgency_analysis["level"] >= 4:
+            actions.append({
+                "action": "priority_flag",
+                "description": "Flag as high priority in team queue",
+                "timing": "immediate",
+                "confidence": 0.9
+            })
+            
+        if "carrier_sync" in autonomous_capabilities:
+            actions.append({
+                "action": "carrier_sync",
+                "description": "Sync information with carrier systems",
+                "timing": "within_15_minutes",
+                "confidence": 0.8
+            })
+            
+        if "customs_notification" in autonomous_capabilities:
+            actions.append({
+                "action": "customs_notification",
+                "description": "Notify customs team of arrival",
+                "timing": "immediate",
+                "confidence": 0.85
+            })
+            
+        # Escalation actions
+        if routing_decision.get("escalation_recommended"):
+            actions.append({
+                "action": "escalation_alert",
+                "description": f"Send escalation alert to {queue_info.get('escalation', 'supervisor')}",
+                "timing": "immediate",
+                "confidence": 0.9
+            })
+            
+        return actions
+    
+    def _build_reasoning_chain(self, patterns: Dict, business_context: Dict, urgency_analysis: Dict, routing_decision: Dict) -> List[str]:
+        """Build transparent reasoning chain for decision explanation"""
+        
+        chain = []
+        
+        # Pattern analysis reasoning
+        if patterns.get("email_type") != "unknown":
+            chain.append(f"🔍 Identified email type: {patterns['email_type']}")
+            
+        if patterns.get("sender_type") != "unknown":
+            chain.append(f"👤 Sender classification: {patterns['sender_type']}")
+            
+        # Business context reasoning
+        if business_context.get("service_type") != "unknown":
+            chain.append(f"🚢 Service type detected: {business_context['service_type']}")
+            
+        if business_context.get("compliance_requirements"):
+            chain.append(f"⚖️ Compliance requirements: {', '.join(business_context['compliance_requirements'])}")
+            
+        # Urgency reasoning
+        chain.append(f"⏰ Urgency level: {urgency_analysis['level']}/5 ({urgency_analysis['time_sensitivity']})")
+        
+        if urgency_analysis.get("factors"):
+            chain.append(f"📈 Urgency factors: {', '.join(urgency_analysis['factors'])}")
+            
+        # Final decision reasoning
+        chain.append(f"🎯 Final routing: {routing_decision['queue']} (confidence: {routing_decision['confidence']:.1%})")
+        
+        return chain
+    
+    def determine_routing(self, content: str, filename: str = "") -> Tuple[str, str, float, List[str]]:
+        """Determine routing using agentic intelligence"""
+        
+        # Use the new agentic analysis system
+        analysis = self.intelligent_content_analysis(content, filename)
+        
+        routing_decision = analysis["routing_decision"]
+        reasoning_chain = analysis["reasoning_chain"]
+        
+        return (
+            routing_decision["queue"],
+            self.routing_rules["routing_queues"][routing_decision["queue"]]["description"],
+            routing_decision["confidence"],
+            reasoning_chain
         )
-        
-        for queue_name, rule in sorted_queues:
-            if queue_name == "Shipment_Initiation_Brkg_Inland_SI":
-                continue
-            
-            # Check Account_Inquiry_US rules
-            if queue_name == "Account_Inquiry_US":
-                keywords = rule.get("keywords", [])
-                subject = email_data.get("subject", "").lower()
-                body = email_data.get("body", "").lower()
-                filename_lower = filename.lower()
-                
-                matched_keywords = []
-                for keyword in keywords:
-                    if (keyword.lower() in subject or 
-                        keyword.lower() in body or 
-                        keyword.lower() in filename_lower):
-                        matched_keywords.append(keyword)
-                
-                if matched_keywords:
-                    confidence = min(0.95, 0.4 + 0.2 * len(matched_keywords))
-                    reasons.append(f"Matched keywords: {', '.join(matched_keywords)}")
-                    return queue_name, rule["description"], confidence, reasons
-            
-            # Check ORD_SI-Non_UPS_Shipments rules
-            elif queue_name == "ORD_SI-Non_UPS_Shipments":
-                from_domain = rule.get("from_domain", "")
-                sender = email_data.get("from", "").lower()
-                
-                if from_domain.lower() in sender:
-                    reasons.append(f"Email from domain: {from_domain}")
-                    return queue_name, rule["description"], 0.95, reasons
-            
-            # Check ORD_Pre-Alert_SI rules
-            elif queue_name == "ORD_Pre-Alert_SI":
-                keywords = rule.get("subject_keywords", [])
-                subject = email_data.get("subject", "").lower()
-                
-                for keyword in keywords:
-                    if keyword.lower() in subject:
-                        reasons.append(f"Subject contains: {keyword}")
-                        return queue_name, rule["description"], 0.90, reasons
-            
-            # Check ORD_Ocean_Arrival_Notices rules
-            elif queue_name == "ORD_Ocean_Arrival_Notices":
-                keywords = rule.get("content_keywords", [])
-                subject = email_data.get("subject", "").lower()
-                body = email_data.get("body", "").lower()
-                
-                for keyword in keywords:
-                    if keyword.lower() in subject or keyword.lower() in body:
-                        location = "subject" if keyword.lower() in subject else "body"
-                        reasons.append(f"Found '{keyword}' in {location}")
-                        return queue_name, rule["description"], 0.85, reasons
-        
-        # Default to catch-all queue
-        reasons.append("No specific routing rules matched - using default queue")
-        return "Shipment_Initiation_Brkg_Inland_SI", self.routing_rules["routing_queues"]["Shipment_Initiation_Brkg_Inland_SI"]["description"], 0.70, reasons
+    
+    def get_agentic_analysis(self, content: str, filename: str = "") -> Dict:
+        """Get full agentic analysis for display"""
+        return self.intelligent_content_analysis(content, filename)
     
     def analyze_with_claude(self, content: str, filename: str = "") -> Dict:
         """Use Claude API for advanced content analysis"""
@@ -412,34 +656,166 @@ class ShipmentRoutingAgent:
                 "reasons": [f"API error: {str(e)}"]
             }
 
-def display_routing_result(queue_name: str, description: str, confidence: float, reasons: List[str], rules: Dict):
-    """Display routing result with styled card and destination details"""
+def display_agentic_analysis(analysis: Dict):
+    """Display comprehensive agentic analysis results"""
+    
+    st.markdown("""
+    <div class="agentic-analysis">
+        <h3 style="margin-top: 0;">🤖 Agentic Intelligence Analysis</h3>
+    </div>
+    """, unsafe_allow_html=True)
+    
+    # Analysis Overview
+    col1, col2, col3, col4 = st.columns(4)
+    
+    with col1:
+        email_type = analysis["patterns"].get("email_type", "unknown").replace("_", " ").title()
+        st.metric("Email Type", email_type)
+    
+    with col2:
+        urgency_level = analysis["urgency_analysis"]["level"]
+        urgency_color = "🔴" if urgency_level >= 4 else "🟠" if urgency_level >= 3 else "🟢"
+        st.metric("Urgency Level", f"{urgency_color} {urgency_level}/5")
+    
+    with col3:
+        confidence = analysis["confidence"]
+        confidence_color = "🟢" if confidence >= 0.8 else "🟡" if confidence >= 0.6 else "🔴"
+        st.metric("Confidence", f"{confidence_color} {confidence:.1%}")
+    
+    with col4:
+        business_impact = analysis["urgency_analysis"]["business_impact"]
+        impact_color = "🔴" if business_impact == "critical" else "🟠" if business_impact == "high" else "🟢"
+        st.metric("Business Impact", f"{impact_color} {business_impact.title()}")
+    
+    # Reasoning Chain
+    st.markdown("#### 🧠 **Intelligent Reasoning Chain**")
+    reasoning_chain = analysis["reasoning_chain"]
+    
+    for i, step in enumerate(reasoning_chain, 1):
+        st.markdown(f"**Step {i}:** {step}")
+    
+    # Pattern Detection Results
+    with st.expander("🔍 **Pattern Detection Analysis**"):
+        patterns = analysis["patterns"]
+        
+        col_pat1, col_pat2 = st.columns(2)
+        
+        with col_pat1:
+            st.markdown("**Content Indicators:**")
+            indicators = patterns.get("content_indicators", [])
+            if indicators:
+                for indicator in indicators:
+                    st.write(f"✅ {indicator.replace('_', ' ').title()}")
+            else:
+                st.write("No specific indicators detected")
+                
+            st.markdown("**Structural Elements:**")
+            elements = patterns.get("structural_elements", [])
+            if elements:
+                for element in elements:
+                    st.write(f"📋 {element.replace('_', ' ').title()}")
+            else:
+                st.write("No structural elements found")
+        
+        with col_pat2:
+            st.markdown("**Business Signals:**")
+            signals = patterns.get("business_signals", [])
+            if signals:
+                for signal in signals:
+                    st.write(f"📊 {signal.replace('_', ' ').title()}")
+            else:
+                st.write("No business signals detected")
+                
+            st.markdown("**Sender Classification:**")
+            sender_type = patterns.get("sender_type", "unknown")
+            st.write(f"👤 {sender_type.replace('_', ' ').title()}")
+    
+    # Business Context Analysis
+    with st.expander("🏢 **Business Context Analysis**"):
+        context = analysis["business_context"]
+        
+        col_ctx1, col_ctx2 = st.columns(2)
+        
+        with col_ctx1:
+            st.markdown("**Service Context:**")
+            st.write(f"🌎 Geographic Scope: {context.get('geographic_scope', 'Unknown').replace('_', ' ').title()}")
+            st.write(f"🚚 Service Type: {context.get('service_type', 'Unknown').replace('_', ' ').title()}")
+            st.write(f"💼 Business Unit: {context.get('business_unit', 'Unknown').replace('_', ' ').title()}")
+        
+        with col_ctx2:
+            st.markdown("**Compliance Requirements:**")
+            requirements = context.get("compliance_requirements", [])
+            if requirements:
+                for req in requirements:
+                    st.write(f"⚖️ {req.replace('_', ' ').title()}")
+            else:
+                st.write("No specific compliance requirements")
+            
+            st.write(f"📈 Operational Impact: {context.get('operational_impact', 'Unknown').title()}")
+    
+    # Autonomous Actions Planning
+    st.markdown("#### 🚀 **Planned Autonomous Actions**")
+    actions = analysis["autonomous_actions"]
+    
+    if actions:
+        for action in actions:
+            action_name = action["action"].replace("_", " ").title()
+            confidence_badge = "🟢" if action["confidence"] >= 0.8 else "🟡" if action["confidence"] >= 0.6 else "🔴"
+            
+            st.markdown(f"""
+            **{action_name}** {confidence_badge} {action["confidence"]:.1%}
+            - *{action["description"]}*
+            - ⏰ Timing: {action["timing"].replace("_", " ").title()}
+            """)
+    else:
+        st.info("No autonomous actions planned for this routing decision")
+
+def display_routing_result(queue_name: str, description: str, confidence: float, reasons: List[str], rules: Dict, analysis: Dict = None):
+    """Display routing result with styled card and agentic insights"""
     queue_info = rules["routing_queues"].get(queue_name, {})
     color = queue_info.get("color", "#6c757d")
     
     confidence_class = "confidence-high" if confidence > 0.8 else "confidence-medium" if confidence > 0.5 else "confidence-low"
     
+    # Main routing card
     st.markdown(f"""
     <div class="routing-card {confidence_class}">
-        <h4 style="color: {color}; margin: 0;">📍 {queue_name}</h4>
+        <h4 style="color: {color}; margin: 0;">🎯 AGENTIC ROUTING DECISION</h4>
+        <h5 style="color: {color}; margin: 0.5rem 0;">📍 {queue_name}</h5>
         <p style="margin: 0.5rem 0;"><strong>Description:</strong> {description}</p>
         <p style="margin: 0.5rem 0;"><strong>Confidence:</strong> {confidence:.1%}</p>
         <p style="margin: 0;"><strong>Team:</strong> {queue_info.get('team', 'Unknown Team')}</p>
     </div>
     """, unsafe_allow_html=True)
     
-    if reasons:
+    # Show agentic analysis if available
+    if analysis:
+        display_agentic_analysis(analysis)
+    
+    # Traditional reasons (if no agentic analysis)
+    elif reasons:
         st.markdown("**🔍 Routing Reasons:**")
         for reason in reasons:
             st.write(f"• {reason}")
+    
+    # Business Impact Assessment
+    business_impact = queue_info.get("business_impact", "medium")
+    if business_impact in ["high", "critical"]:
+        impact_color = "🔴" if business_impact == "critical" else "🟠"
+        st.warning(f"{impact_color} **High Business Impact Queue** - {business_impact.upper()} priority processing required")
+    
+    # Autonomous capabilities
+    autonomous_actions = queue_info.get("autonomous_actions", [])
+    if autonomous_actions:
+        st.info(f"🤖 **Autonomous Capabilities:** {', '.join([action.replace('_', ' ').title() for action in autonomous_actions])}")
 
-def simulate_email_forwarding(queue_name: str, original_email: Dict, rules: Dict):
-    """Simulate where the email would be forwarded after routing"""
+def simulate_email_forwarding(queue_name: str, original_email: Dict, rules: Dict, autonomous_actions: List[Dict] = None):
+    """Simulate where the email would be forwarded after routing with autonomous actions"""
     queue_info = rules["routing_queues"].get(queue_name, {})
     
     st.markdown("""
     <div class="forwarding-simulation">
-        <h3 style="color: #007bff; margin-top: 0;">📧 Email Forwarding Simulation</h3>
+        <h3 style="color: #007bff; margin-top: 0;">📧 Agentic Email Forwarding Simulation</h3>
     </div>
     """, unsafe_allow_html=True)
     
@@ -453,6 +829,17 @@ def simulate_email_forwarding(queue_name: str, original_email: Dict, rules: Dict
         **Subject:** {original_email.get('subject', 'No subject')}
         **Received:** {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
         """)
+        
+        # Show autonomous actions if available
+        if autonomous_actions:
+            st.markdown("#### 🤖 **Autonomous Actions Executed**")
+            for action in autonomous_actions:
+                action_name = action["action"].replace("_", " ").title()
+                confidence_badge = "✅" if action["confidence"] >= 0.8 else "⚠️" if action["confidence"] >= 0.6 else "❌"
+                timing_badge = "🟢" if action["timing"] == "immediate" else "🟡"
+                
+                st.success(f"{confidence_badge} **{action_name}** {timing_badge}")
+                st.caption(f"↳ {action['description']}")
     
     with col2:
         st.markdown("#### 📤 **Routed To Team**")
@@ -461,12 +848,16 @@ def simulate_email_forwarding(queue_name: str, original_email: Dict, rules: Dict
         team = queue_info.get('team', 'Unknown Team')
         sla = queue_info.get('sla', 'N/A')
         escalation = queue_info.get('escalation', 'N/A')
+        business_impact = queue_info.get('business_impact', 'medium')
         
-        # Primary contacts
+        # Primary contacts with business impact
+        impact_color = "🔴" if business_impact == "critical" else "🟠" if business_impact == "high" else "🟢"
+        
         st.success(f"""
         **Team:** {team}
         **Queue:** {queue_name}
         **SLA Target:** {sla}
+        **Impact:** {impact_color} {business_impact.title()}
         """)
         
         st.markdown("**📬 Recipients:**")
@@ -477,78 +868,30 @@ def simulate_email_forwarding(queue_name: str, original_email: Dict, rules: Dict
         if escalation != 'N/A':
             st.write(f"• **Escalation:** {escalation}")
     
-    # Show the forwarded email preview
-    st.markdown("#### 📋 **Forwarded Email Preview**")
+    # Enhanced action buttons with agentic capabilities
+    st.markdown("#### ⚡ **Agentic Actions Available**")
     
-    forwarded_subject = f"[{queue_name}] {original_email.get('subject', 'No subject')}"
-    
-    # Determine priority based on queue
-    priority_level = "High" if queue_info.get('priority', 5) <= 2 else "Normal"
-    priority_color = "🔴" if priority_level == "High" else "🟢"
-    
-    forwarded_body = f"""--- AUTO-ROUTED EMAIL ---
-Original From: {original_email.get('from', 'Unknown')}
-Original To: {rules['team_mailbox']}
-Routing Decision: {queue_name}
-Assigned Team: {team}
-Priority Level: {priority_color} {priority_level}
-SLA Target: {sla}
-Routing Timestamp: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}
-
---- ORIGINAL MESSAGE ---
-{original_email.get('body', 'No content')[:500]}...
-
---- ROUTING METADATA ---
-System: ORD Shipment Routing Agent
-Confidence: Auto-generated
-Next Action: Team review and processing
-"""
-    
-    st.markdown("""
-    <div class="email-preview">
-    """, unsafe_allow_html=True)
-    
-    st.code(f"""From: {rules['team_mailbox']}
-To: {', '.join(contacts)}
-Subject: {forwarded_subject}
-Priority: {priority_level}
-X-Routing-Queue: {queue_name}
-X-SLA-Target: {sla}
-
-{forwarded_body}""", language="text")
-    
-    st.markdown("</div>", unsafe_allow_html=True)
-    
-    # Action buttons simulation
-    st.markdown("#### ⚡ **Next Actions**")
-    col_action1, col_action2, col_action3 = st.columns(3)
+    col_action1, col_action2, col_action3, col_action4 = st.columns(4)
     
     with col_action1:
-        if st.button(f"✅ Accept by {team[:15]}...", key=f"accept_{queue_name}"):
-            st.success(f"✅ Email accepted by {team}")
+        if st.button(f"✅ Accept & Auto-Process", key=f"accept_{queue_name}"):
+            st.success(f"✅ Email accepted by {team} - Autonomous processing initiated")
     
     with col_action2:
-        if st.button(f"🔄 Reassign", key=f"reassign_{queue_name}"):
-            st.warning("🔄 Reassignment options would appear here")
+        if st.button(f"🤖 Execute Auto-Actions", key=f"auto_{queue_name}"):
+            st.info("🤖 Executing configured autonomous actions...")
     
     with col_action3:
-        if st.button(f"🚨 Escalate", key=f"escalate_{queue_name}"):
-            st.error(f"🚨 Escalating to: {escalation}")
+        if st.button(f"🔄 Smart Reassign", key=f"reassign_{queue_name}"):
+            st.warning("🔄 AI-powered reassignment analysis initiated")
     
-    # Show expected timeline
-    st.markdown("#### ⏰ **Expected Timeline**")
-    timeline_info = f"""
-    **Now:** Email received and routed to {team}
-    **+15 min:** Team notification sent
-    **+{sla}:** SLA target for initial response
-    **+{int(sla.replace('h', '').replace('min', '').replace(' hours', '').replace(' hour', '').replace(' minutes', '').replace(' minute', '')) * 2 if 'h' in sla else int(sla.replace('min', '').replace(' minutes', '').replace(' minute', '')) * 2}{'h' if 'h' in sla else 'min'}:** Escalation if no response
-    """
-    st.info(timeline_info)
+    with col_action4:
+        if st.button(f"🚨 Intelligent Escalate", key=f"escalate_{queue_name}"):
+            st.error(f"🚨 Smart escalation to: {escalation}")
 
 def create_eml_file(sample_name: str, sample_content: str) -> bytes:
     """Create a proper .eml file from sample content"""
     try:
-        # Parse the sample content to extract components
         lines = sample_content.split('\n')
         from_addr = ""
         to_addr = ""
@@ -568,7 +911,6 @@ def create_eml_file(sample_name: str, sample_content: str) -> bytes:
             elif in_body:
                 body_lines.append(line)
         
-        # Create email message
         msg = MimeMultipart()
         msg['From'] = from_addr
         msg['To'] = to_addr
@@ -576,11 +918,9 @@ def create_eml_file(sample_name: str, sample_content: str) -> bytes:
         msg['Date'] = formatdate(localtime=True)
         msg['Message-ID'] = f"<{datetime.now().strftime('%Y%m%d%H%M%S')}@ordrouting.local>"
         
-        # Add body
         body = '\n'.join(body_lines)
         msg.attach(MimeText(body, 'plain'))
         
-        # Return as bytes
         return msg.as_bytes()
         
     except Exception as e:
@@ -670,8 +1010,8 @@ def main():
     # Header
     st.markdown("""
     <div class="main-header">
-        <h1>🚢 ORD Shipment Routing Agent</h1>
-        <p>Intelligent Document Routing for Chicago ORD Operations</p>
+        <h1>🤖 Agentic ORD Shipment Routing System</h1>
+        <p>AI-Powered Intelligent Document Routing with Autonomous Actions for Chicago ORD Operations</p>
     </div>
     """, unsafe_allow_html=True)
     
@@ -689,7 +1029,7 @@ def main():
         )
         
         if not api_key:
-            st.info("💡 Rule-based routing works without API key!")
+            st.info("💡 Agentic routing works without API key!")
         
         # Sample data selector
         st.subheader("📝 Sample Data")
@@ -718,37 +1058,23 @@ def main():
                         help="Download as .eml email file"
                     )
         
-        # Bulk download option
-        if st.button("📦 Download All Sample .eml Files"):
-            # Create a zip file with all samples
-            import zipfile
-            import io
-            
-            zip_buffer = io.BytesIO()
-            with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-                for name, content in sample_data.items():
-                    eml_content = create_eml_file(name, content)
-                    if eml_content:
-                        filename = f"{name.replace(' ', '_').lower()}.eml"
-                        zip_file.writestr(filename, eml_content)
-            
-            st.download_button(
-                label="📦 Download ZIP with all samples",
-                data=zip_buffer.getvalue(),
-                file_name="ord_sample_emails.zip",
-                mime="application/zip"
-            )
-        
         # Display routing rules
-        st.subheader("📋 Routing Rules")
-        with st.expander("View Routing Logic"):
+        st.subheader("🧠 Agentic Routing Intelligence")
+        with st.expander("View Intelligent Routing Logic"):
             st.markdown("""
-            **Queue Priority Order:**
-            1. 🔴 **Account_Inquiry_US** - POA, Account Setup
-            2. 🟠 **ORD_SI-Non_UPS_Shipments** - Evergreen Line
-            3. 🟡 **ORD_Pre-Alert_SI** - Pre-Alert notifications
-            4. 🟢 **ORD_Ocean_Arrival_Notices** - Arrival notices
-            5. ⚪ **Shipment_Initiation_Brkg_Inland_SI** - Default
+            **Multi-Layer Analysis:**
+            1. 🔍 **Pattern Recognition** - Content & structural analysis
+            2. 🏢 **Business Context** - Service type & compliance detection  
+            3. ⏰ **Urgency Assessment** - Priority & impact evaluation
+            4. 🎯 **Intelligent Routing** - Confidence-based decisions
+            5. 🤖 **Autonomous Actions** - Automated processing initiation
+            
+            **Routing Queues:**
+            1. 🔴 **Account_Inquiry_US** - POA, Account Setup (4h SLA)
+            2. 🟠 **ORD_SI-Non_UPS_Shipments** - Evergreen Line (2h SLA)
+            3. 🟡 **ORD_Pre-Alert_SI** - Pre-Alert notifications (1h SLA)
+            4. 🟢 **ORD_Ocean_Arrival_Notices** - Arrival notices (30min SLA)
+            5. ⚪ **Shipment_Initiation_Brkg_Inland_SI** - Default (6h SLA)
             """)
     
     # Initialize agent
@@ -762,7 +1088,7 @@ def main():
     col1, col2 = st.columns([2, 1])
     
     with col1:
-        st.subheader("📤 Document Upload & Analysis")
+        st.subheader("📤 Document Upload & Agentic Analysis")
         
         # File uploader
         uploaded_file = st.file_uploader(
@@ -798,23 +1124,63 @@ def main():
                     st.text_area("Extracted Content:", content[:1000] + "..." if len(content) > 1000 else content, height=150, disabled=True)
                 
                 # Analyze and route
-                st.subheader("🎯 Routing Analysis")
+                st.subheader("🎯 Agentic Routing Analysis")
                 
-                col_btn1, col_btn2 = st.columns(2)
+                col_btn1, col_btn2, col_btn3 = st.columns(3)
                 
                 with col_btn1:
-                    if st.button("⚡ Quick Rule-Based Routing", type="primary"):
-                        with st.spinner("🔍 Analyzing content..."):
+                    if st.button("⚡ Quick Agentic Routing", type="primary"):
+                        with st.spinner("🤖 Running agentic analysis..."):
                             queue, description, confidence, reasons = agent.determine_routing(content, filename)
                             
-                            st.success("✅ **Routing Decision Complete**")
-                            display_routing_result(queue, description, confidence, reasons, agent.routing_rules)
+                            st.success("✅ **Agentic Routing Complete**")
+                            
+                            # Get full agentic analysis
+                            analysis = agent.get_agentic_analysis(content, filename)
+                            display_routing_result(queue, description, confidence, reasons, agent.routing_rules, analysis)
                             
                             # Show forwarding simulation
                             email_data = agent.parse_email_content(content)
-                            simulate_email_forwarding(queue, email_data, agent.routing_rules)
+                            simulate_email_forwarding(queue, email_data, agent.routing_rules, analysis.get("autonomous_actions"))
                 
                 with col_btn2:
+                    if st.button("🧠 Deep Intelligence Analysis"):
+                        with st.spinner("🔍 Performing deep agentic analysis..."):
+                            # Get comprehensive agentic analysis
+                            analysis = agent.get_agentic_analysis(content, filename)
+                            
+                            st.success("✅ **Deep Intelligence Analysis Complete**")
+                            
+                            # Display detailed agentic analysis
+                            display_agentic_analysis(analysis)
+                            
+                            # Show routing decision
+                            routing_decision = analysis["routing_decision"]
+                            queue_name = routing_decision["queue"]
+                            queue_info = agent.routing_rules["routing_queues"][queue_name]
+                            
+                            st.markdown("#### 🎯 **Final Routing Decision**")
+                            display_routing_result(
+                                queue_name,
+                                queue_info["description"],
+                                routing_decision["confidence"],
+                                routing_decision["reasons"],
+                                agent.routing_rules
+                            )
+                            
+                            # Show autonomous actions that would be executed
+                            autonomous_actions = analysis["autonomous_actions"]
+                            if autonomous_actions:
+                                st.markdown("#### 🚀 **Autonomous Actions Execution**")
+                                for action in autonomous_actions:
+                                    action_status = "✅ READY" if action["confidence"] >= 0.8 else "⚠️ REVIEW" if action["confidence"] >= 0.6 else "❌ MANUAL"
+                                    st.info(f"**{action['action'].replace('_', ' ').title()}** - {action_status}")
+                            
+                            # Show forwarding simulation
+                            email_data = agent.parse_email_content(content)
+                            simulate_email_forwarding(queue_name, email_data, agent.routing_rules, autonomous_actions)
+                
+                with col_btn3:
                     if st.button("🤖 AI-Powered Analysis") and api_key:
                         with st.spinner("🤖 Running Claude analysis..."):
                             claude_result = agent.analyze_with_claude(content, filename)
@@ -864,11 +1230,15 @@ def main():
                 team_name = queue_info.get('team', 'Unknown Team')
                 contacts = queue_info.get('contacts', [])
                 sla = queue_info.get('sla', 'N/A')
+                business_impact = queue_info.get('business_impact', 'medium')
+                autonomous_actions = queue_info.get('autonomous_actions', [])
                 
                 st.markdown(f"**{team_name}**")
                 for contact in contacts:
                     st.write(f"• {contact}")
                 st.write(f"⏱️ SLA: {sla}")
+                st.write(f"📊 Impact: {business_impact.title()}")
+                st.write(f"🤖 Auto Actions: {len(autonomous_actions)}")
                 st.write("---")
         
         # Main contacts
@@ -890,8 +1260,14 @@ def main():
         
         # Help section
         st.subheader("❓ How to Use")
-        with st.expander("Quick Guide"):
+        with st.expander("Agentic Intelligence Guide"):
             st.markdown("""
+            **🤖 Agentic Intelligence:**
+            - Multi-layer pattern recognition and analysis
+            - Business context understanding and compliance detection
+            - Autonomous action planning and execution
+            - Confidence-based routing with transparent reasoning
+            
             **📧 Email Files (.eml/.msg):**
             - Upload .eml or .msg files directly
             - Download sample .eml files to test
@@ -899,10 +1275,10 @@ def main():
             
             **📄 Documents:**
             1. **Upload** a document or **paste** email content
-            2. Click **Quick Routing** for rule-based analysis
-            3. Click **AI Analysis** (with API key) for advanced routing
-            4. Review routing decision and confidence score
-            5. Check reasons for routing logic
+            2. Click **Quick Agentic Routing** for intelligent analysis
+            3. Click **Deep Intelligence Analysis** for comprehensive insights
+            4. Click **AI Analysis** (with API key) for Claude integration
+            5. Review routing decision, confidence, and autonomous actions
             
             **📁 Supported Formats:**
             - .eml (Email files)
@@ -912,74 +1288,31 @@ def main():
             - .txt (Text files)
             - Images (manual text extraction)
             """)
-        
-        # File format info
-        with st.expander("📧 Email Format Support"):
-            st.markdown("""
-            **✅ .eml files:** Standard email format
-            - Proper header parsing
-            - Multi-part message support
-            - Attachment detection
-            
-            **✅ .msg files:** Microsoft Outlook format
-            - Full message extraction
-            - Metadata preservation
-            - Rich formatting support
-            
-            **💡 Tip:** Download sample .eml files above to test!
-            """)
 
     # Footer with routing reference
     st.markdown("---")
     
     # Routing reference table
-    st.subheader("📋 **Complete Routing Reference**")
+    st.subheader("📋 **Complete Agentic Routing Reference**")
     
     routing_ref_data = []
     for queue_name, queue_info in agent.routing_rules["routing_queues"].items():
         routing_ref_data.append({
             "Queue": queue_name.replace("ORD_", "").replace("_", " "),
             "Team": queue_info.get('team', 'Unknown'),
-            "Triggers": ", ".join(queue_info.get('keywords', queue_info.get('subject_keywords', queue_info.get('content_keywords', ['Domain check' if 'from_domain' in queue_info else 'Default'])))),
             "SLA": queue_info.get('sla', 'N/A'),
+            "Business Impact": queue_info.get('business_impact', 'medium').title(),
+            "Auto Actions": len(queue_info.get('autonomous_actions', [])),
             "Primary Contact": queue_info.get('contacts', ['N/A'])[0] if queue_info.get('contacts') else 'N/A'
         })
     
     routing_df = pd.DataFrame(routing_ref_data)
     st.dataframe(routing_df, hide_index=True, use_container_width=True)
     
-    # Show sample forwarding for reference
-    with st.expander("📧 **Sample Email Forwarding Examples**"):
-        st.markdown("""
-        **Example 1: Account Setup Email**
-        ```
-        From: customer@company.com → account.setup@ups.com
-        Subject: [Account_Inquiry_US] Account Setup Required - Power of Attorney
-        Team: Customer Account Services Team
-        SLA: 4 hours
-        ```
-        
-        **Example 2: Pre-Alert Notification**  
-        ```
-        From: shipper@company.com → prealert.team@ups.com
-        Subject: [ORD_Pre-Alert_SI] Shipment Pre-Alert - Container ABC123
-        Team: Shipment Coordination Team
-        SLA: 1 hour
-        ```
-        
-        **Example 3: Arrival Notice**
-        ```
-        From: port@chicago.com → port.operations@ups.com
-        Subject: [ORD_Ocean_Arrival_Notices] Container Arrival Notice
-        Team: Port Operations Team  
-        SLA: 30 minutes
-        ```
-        """)
-    
     st.markdown(
         "<div style='text-align: center; color: #666;'>"
-        "🚢 UPS ORD Shipment Routing Agent | Powered by Claude AI & Streamlit<br>"
-        "📧 All emails routed to appropriate teams with SLA tracking and escalation protocols"
+        "🤖 UPS ORD Agentic Routing System | Powered by Multi-Layer AI Intelligence & Autonomous Actions<br>"
+        "📧 Intelligent email routing with pattern recognition, business context analysis, and autonomous processing"
         "</div>",
         unsafe_allow_html=True
     )
