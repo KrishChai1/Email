@@ -14,7 +14,7 @@ from io import BytesIO
 
 # Page config
 st.set_page_config(
-    page_title="UPS Brokerage Email Automation Manager (BEAM)",
+    page_title="BEAM - Brokerage Email Automation Manager",
     page_icon="📧",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -165,7 +165,7 @@ class EmailRoutingAgent:
         ]
     
     def parse_eml_file(self, eml_content: str) -> Dict:
-        """Parse .eml file content"""
+        """Parse .eml or .msg file content"""
         try:
             msg = email.message_from_string(eml_content)
             
@@ -201,7 +201,8 @@ class EmailRoutingAgent:
             return email_data
             
         except Exception as e:
-            st.error(f"Error parsing email: {str(e)}")
+            st.error(f"Error parsing email file: {str(e)}")
+            st.info("💡 Note: .msg files work best when converted to .eml format first")
             return {}
     
     def extract_from_domain(self, from_address: str) -> str:
@@ -508,9 +509,10 @@ def main():
     # Header
     st.markdown("""
     <div class="main-header">
-        <h1>📧 UPS Email Processing & Routing System</h1>
+        <h1>📧 Brokerage Email Automation Manager</h1>
+        <h2 style="text-align: center; color: white; margin: 0; font-size: 1.5em;">BEAM</h2>
         <p style="text-align: center; color: white; margin: 0;">
-            ORD & SF Email to Case - Automated Processing & AI Analysis
+            Intelligent Email Processing & AI-Powered Analysis
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -526,6 +528,16 @@ def main():
             st.sidebar.success("✅ Valid API key format")
         else:
             st.sidebar.error("❌ API key should start with 'sk-ant-'")
+    
+    st.sidebar.markdown("---")
+    st.sidebar.markdown("### 📁 Supported File Types")
+    st.sidebar.markdown("""
+    **📧 .eml files** - Standard email format (Recommended)
+    
+    **📮 .msg files** - Outlook email format (Basic support)
+    
+    💡 **Tip:** For best results with .msg files, save as .eml in Outlook first
+    """)
     
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 📋 Routing Rules")
@@ -555,14 +567,26 @@ def main():
         
         # File upload
         uploaded_file = st.file_uploader(
-            "Upload .eml file",
-            type=['eml'],
-            help="Upload an email file in .eml format for processing"
+            "Upload email file (.eml or .msg)",
+            type=['eml', 'msg'],
+            help="Upload an email file in .eml or .msg format for processing"
         )
         
         if uploaded_file is not None:
             # Read file content
-            eml_content = uploaded_file.read().decode('utf-8')
+            try:
+                if uploaded_file.name.endswith('.msg'):
+                    # For .msg files, try to read as text (may require conversion)
+                    eml_content = uploaded_file.read().decode('utf-8', errors='ignore')
+                    st.info("📧 .msg file detected - processing as email format")
+                else:
+                    # For .eml files, standard processing
+                    eml_content = uploaded_file.read().decode('utf-8')
+                    
+            except Exception as e:
+                st.error(f"Error reading file: {str(e)}")
+                st.info("💡 Tip: If using .msg files, try saving as .eml format in Outlook first")
+                return
             
             # Process email
             with st.spinner("🔄 Processing email..."):
@@ -798,6 +822,3 @@ def main():
 
 if __name__ == "__main__":
     main()
-
-
-
