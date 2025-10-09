@@ -23,3 +23,8 @@ tabulate
 openpyxl
 xlsxwriter
 anthropic
+anthropic
+extract-msg
+pandas
+numpy
+
