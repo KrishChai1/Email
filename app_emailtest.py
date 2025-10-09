@@ -485,7 +485,7 @@ Provide a structured, actionable analysis that a business user can immediately a
         return message.content[0].text
         
     except Exception as e:
-        return f"❌ **Error in Claude analysis:** {str(e)}\n\n**Possible solutions:**\n- Check your API key format (should start with 'sk-ant-')\n- Verify your API key is active\n- Ensure you have API credits available"
+        return f"❌ **Error in analysis:** {str(e)}\n\n**Possible solutions:**\n- Check your API key format (should start with 'sk-ant-')\n- Verify your API key is active\n- Ensure you have API credits available"
 
 def get_api_key():
     """Get API key from environment or user input"""
@@ -510,7 +510,7 @@ def main():
     <div class="main-header">
         <h1>📧 UPS Email Processing & Routing System</h1>
         <p style="text-align: center; color: white; margin: 0;">
-            ORD & SF Email to Case - Automated Processing & Claude AI Analysis
+            ORD & SF Email to Case - Automated Processing & AI Analysis
         </p>
     </div>
     """, unsafe_allow_html=True)
@@ -595,7 +595,7 @@ def main():
                 """, unsafe_allow_html=True)
                 
                 # Email details tabs
-                tab1, tab2, tab3, tab4 = st.tabs(["📧 Email Details", "📊 Smart Analysis", "🤖 AI Analysis", "📥 Export"])
+                tab1, tab2, tab3, tab4 = st.tabs(["📧 Email Details", "📊 Smart Analysis", "🧠 AI Analysis", "📥 Export"])
                 
                 with tab1:
                     st.subheader("Email Information")
@@ -681,29 +681,27 @@ def main():
                     col_sent4.metric("Negative Signals", sentiment_data['negative_indicators'])
                 
                 with tab3:
-                    st.subheader("🤖 Claude AI Deep Analysis")
+                    st.subheader("🧠 Comprehensive Analysis")
                     
-                    if st.button("🚀 Analyze with Claude AI", type="primary"):
-                        if not api_key:
-                            st.warning("🔑 Please enter Claude API key in sidebar or set ANTHROPIC_API_KEY environment variable")
-                        elif not api_key.startswith('sk-ant-'):
-                            st.error("❌ Invalid API key format. Claude API keys start with 'sk-ant-'")
-                        else:
-                            with st.spinner("🧠 Analyzing with Claude AI..."):
-                                email_content = f"""
-                                From: {email_data.get('from', 'N/A')}
-                                To: {email_data.get('to', 'N/A')}
-                                Subject: {email_data.get('subject', 'N/A')}
-                                Date: {email_data.get('date', 'N/A')}
-                                Routing Decision: {routing_result['scenario']} → {routing_result['routing_queue']}
-                                
-                                Body:
-                                {email_data.get('body', 'N/A')}
-                                """
-                                
-                                analysis = claude_analysis(email_content, api_key)
-                                st.markdown("### 🤖 AI Analysis Results")
-                                st.markdown(analysis)
+                    if not api_key:
+                        st.warning("🔑 Please enter API key in sidebar to enable advanced analysis")
+                    elif not api_key.startswith('sk-ant-'):
+                        st.error("❌ Invalid API key format. API keys should start with 'sk-ant-'")
+                    else:
+                        with st.spinner("🧠 Analyzing..."):
+                            email_content = f"""
+                            From: {email_data.get('from', 'N/A')}
+                            To: {email_data.get('to', 'N/A')}
+                            Subject: {email_data.get('subject', 'N/A')}
+                            Date: {email_data.get('date', 'N/A')}
+                            Routing Decision: {routing_result['scenario']} → {routing_result['routing_queue']}
+                            
+                            Body:
+                            {email_data.get('body', 'N/A')}
+                            """
+                            
+                            analysis = claude_analysis(email_content, api_key)
+                            st.markdown(analysis)
                 
                 with tab4:
                     st.subheader("📥 Export Results")
