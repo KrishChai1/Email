@@ -28,3 +28,4 @@ extract-msg
 pandas
 numpy
 pillow
+email-validator
