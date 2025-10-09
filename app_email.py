@@ -10,6 +10,18 @@ import PyPDF2
 from PIL import Image
 import io
 import email
+from email.mime.text import MimeText
+from email.mime.multipart import MimeMultipart
+from email.utils import formatdate
+import base64
+
+# Try to import MSG support (optional)
+try:
+    import extract_msg
+    MSG_SUPPORT = True
+except ImportError:
+    MSG_SUPPORT = False
+    st.warning("⚠️ For .msg file support, install: pip install extract-msg")
 
 # Configure Streamlit page
 st.set_page_config(
@@ -53,13 +65,6 @@ st.markdown("""
         border-radius: 10px;
         border: 2px solid #007bff;
         margin: 1rem 0;
-    }
-    .team-status {
-        background: #ffffff;
-        border: 1px solid #dee2e6;
-        border-radius: 8px;
-        padding: 0.5rem;
-        margin: 0.25rem 0;
     }
     .email-preview {
         background: #2d3748;
@@ -540,90 +545,6 @@ X-SLA-Target: {sla}
     """
     st.info(timeline_info)
 
-def show_team_workload_simulation():
-    """Show simulated team workload and queue status"""
-    st.markdown("### 📊 **Team Workload Simulation**")
-    
-    # Sample workload data
-    workload_data = {
-        "Account_Inquiry_US": {"pending": 12, "avg_response": "3.2h", "status": "Busy"},
-        "ORD_SI-Non_UPS_Shipments": {"pending": 5, "avg_response": "1.5h", "status": "Normal"},
-        "ORD_Pre-Alert_SI": {"pending": 23, "avg_response": "45min", "status": "High Volume"},
-        "ORD_Ocean_Arrival_Notices": {"pending": 8, "avg_response": "20min", "status": "Normal"},
-        "Shipment_Initiation_Brkg_Inland_SI": {"pending": 45, "avg_response": "4.8h", "status": "Backlog"}
-    }
-    
-    col1, col2, col3, col4 = st.columns(4)
-    
-    with col1:
-        st.metric("Account Services", "12 pending", "3.2h avg")
-    with col2:
-        st.metric("Carrier Relations", "5 pending", "1.5h avg")
-    with col3:
-        st.metric("Pre-Alert Team", "23 pending", "45min avg")
-    with col4:
-        st.metric("Port Operations", "8 pending", "20min avg")
-    
-    # Queue status indicators
-    st.markdown("#### 🚦 **Queue Status**")
-    for queue, data in workload_data.items():
-        status_color = {"Normal": "🟢", "Busy": "🟡", "High Volume": "🟠", "Backlog": "🔴"}
-        queue_short = queue.replace("ORD_", "").replace("_", " ")
-        st.write(f"{status_color.get(data['status'], '⚪')} **{queue_short}**: {data['pending']} pending, {data['avg_response']} avg response")
-
-def create_routing_analytics():
-    """Create routing analytics and recommendations"""
-    st.markdown("### 📈 **Routing Analytics**")
-    
-    # Sample analytics data
-    analytics_data = {
-        "Total Processed Today": 156,
-        "Routing Accuracy": "94.2%",
-        "Avg Processing Time": "2.3 hours",
-        "Most Active Queue": "Pre-Alert SI"
-    }
-    
-    col1, col2, col3, col4 = st.columns(4)
-    with col1:
-        st.metric("Processed Today", analytics_data["Total Processed Today"], "+12%")
-    with col2:
-        st.metric("Accuracy", analytics_data["Routing Accuracy"], "+2.1%")
-    with col3:
-        st.metric("Avg Time", analytics_data["Avg Processing Time"], "-15min")
-    with col4:
-        st.metric("Top Queue", analytics_data["Most Active Queue"])
-    
-    # Recommendations
-    st.markdown("#### 💡 **Smart Recommendations**")
-    st.info("""
-    **⚡ High Priority:** Pre-Alert queue has high volume - consider temporary staff assignment
-    
-    **🔄 Process Improvement:** Account Setup emails could be auto-approved for existing customers
-    
-    **📊 Trending:** Evergreen Line volume increased 15% this week - notify carrier relations team
-    """)
-
-def display_routing_result(queue_name: str, description: str, confidence: float, reasons: List[str], rules: Dict):
-    """Display routing result with styled card and destination details"""
-    queue_info = rules["routing_queues"].get(queue_name, {})
-    color = queue_info.get("color", "#6c757d")
-    
-    confidence_class = "confidence-high" if confidence > 0.8 else "confidence-medium" if confidence > 0.5 else "confidence-low"
-    
-    st.markdown(f"""
-    <div class="routing-card {confidence_class}">
-        <h4 style="color: {color}; margin: 0;">📍 {queue_name}</h4>
-        <p style="margin: 0.5rem 0;"><strong>Description:</strong> {description}</p>
-        <p style="margin: 0.5rem 0;"><strong>Confidence:</strong> {confidence:.1%}</p>
-        <p style="margin: 0;"><strong>Team:</strong> {queue_info.get('team', 'Unknown Team')}</p>
-    </div>
-    """, unsafe_allow_html=True)
-    
-    if reasons:
-        st.markdown("**🔍 Routing Reasons:**")
-        for reason in reasons:
-            st.write(f"• {reason}")
-
 def create_eml_file(sample_name: str, sample_content: str) -> bytes:
     """Create a proper .eml file from sample content"""
     try:
@@ -935,25 +856,19 @@ def main():
                         st.warning("🔑 Please enter Claude API key in the sidebar for AI analysis")
     
     with col2:
-        st.subheader("📊 Live Operations Dashboard")
-        
-        # Team workload simulation
-        show_team_workload_simulation()
-        
-        # Analytics section
-        create_routing_analytics()
-        
-        # Contact information
         st.subheader("📧 Team Contacts")
         
         # Display contact info for each team
         with st.expander("📋 Routing Team Directory"):
             for queue_name, queue_info in agent.routing_rules["routing_queues"].items():
-                st.markdown(f"**{queue_info.get('team', 'Unknown Team')}**")
+                team_name = queue_info.get('team', 'Unknown Team')
                 contacts = queue_info.get('contacts', [])
+                sla = queue_info.get('sla', 'N/A')
+                
+                st.markdown(f"**{team_name}**")
                 for contact in contacts:
                     st.write(f"• {contact}")
-                st.write(f"⏱️ SLA: {queue_info.get('sla', 'N/A')}")
+                st.write(f"⏱️ SLA: {sla}")
                 st.write("---")
         
         # Main contacts
