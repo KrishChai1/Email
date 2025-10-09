@@ -9,6 +9,7 @@ from datetime import datetime
 from typing import Dict, List, Optional
 from enum import Enum
 import base64
+import os
 from io import BytesIO
 
 # Page config
@@ -42,9 +43,16 @@ st.markdown("""
     }
     .routing-result {
         background: #e8f5e9;
-        padding: 1rem;
+        padding: 1.5rem;
         border-radius: 8px;
-        border: 1px solid #4caf50;
+        border: 2px solid #4caf50;
+        margin: 1rem 0;
+    }
+    .action-box {
+        background: #e3f2fd;
+        padding: 1.5rem;
+        border-radius: 8px;
+        border: 2px solid #2196f3;
         margin: 1rem 0;
     }
     .warning-box {
@@ -59,6 +67,13 @@ st.markdown("""
         border: 1px solid #f5c6cb;
         padding: 1rem;
         border-radius: 8px;
+        margin: 1rem 0;
+    }
+    .rule-box {
+        background: #fff9c4;
+        padding: 1rem;
+        border-radius: 8px;
+        border-left: 4px solid #ff9800;
         margin: 1rem 0;
     }
 </style>
@@ -90,6 +105,10 @@ class EmailRoutingAgent:
                 "rule_id": 2,
                 "queue": RoutingQueue.ACCOUNT_INQUIRY_US,
                 "description": "Account Inquiry emails with specific terms",
+                "scenario": "Customer Account Setup/POA Request",
+                "action": "Route to Account Management Team for customer onboarding or Power of Attorney processing",
+                "priority": "HIGH",
+                "sla": "4 hours",
                 "conditions": {
                     "subject_contains": ["power of attorney", "poa", "account needed", "account setup"],
                     "check_attachments": True
@@ -99,6 +118,10 @@ class EmailRoutingAgent:
                 "rule_id": 3,
                 "queue": RoutingQueue.ORD_SI_NON_UPS_SHIPMENTS,
                 "description": "Emails from Evergreen Line domain",
+                "scenario": "External Shipping Partner Communication",
+                "action": "Process as non-UPS shipment documentation from Evergreen Marine",
+                "priority": "MEDIUM",
+                "sla": "8 hours",
                 "conditions": {
                     "from_domain": "@mail.evergreen-line.com"
                 }
@@ -107,6 +130,10 @@ class EmailRoutingAgent:
                 "rule_id": 4,
                 "queue": RoutingQueue.RAFT_PRE_ALERT,
                 "description": "RAFT Pre-Alert emails",
+                "scenario": "Vessel/Container Pre-Alert Notification",
+                "action": "Prepare for incoming container arrival, notify warehouse teams",
+                "priority": "HIGH",
+                "sla": "2 hours",
                 "conditions": {
                     "subject_contains": ["pre-alert", "pre alert", "prealert"]
                 }
@@ -115,6 +142,10 @@ class EmailRoutingAgent:
                 "rule_id": 5,
                 "queue": RoutingQueue.RAFT_ARRIVAL_NOTICE,
                 "description": "RAFT Arrival Notice emails",
+                "scenario": "Container/Shipment Arrival Confirmation",
+                "action": "Update tracking systems, notify customers, coordinate pickup scheduling",
+                "priority": "HIGH", 
+                "sla": "1 hour",
                 "conditions": {
                     "subject_or_body_contains": ["arrival notice"]
                 }
@@ -123,6 +154,10 @@ class EmailRoutingAgent:
                 "rule_id": 1,
                 "queue": RoutingQueue.SHIPMENT_INITIATION_BRKG_INLAND_SI,
                 "description": "Default rule - all other emails",
+                "scenario": "General Shipment/Logistics Communication",
+                "action": "Process as standard shipment initiation or brokerage inland SI request",
+                "priority": "NORMAL",
+                "sla": "24 hours",
                 "conditions": {
                     "default": True
                 }
@@ -200,8 +235,8 @@ class EmailRoutingAgent:
                 return True
         return False
     
-    def apply_routing_rule(self, email_data: Dict, rule: Dict) -> bool:
-        """Apply specific routing rule"""
+    def apply_routing_rule(self, email_data: Dict, rule: Dict) -> tuple:
+        """Apply specific routing rule and return (matched, reason)"""
         conditions = rule["conditions"]
         
         # Rule 2: Account Inquiry
@@ -214,29 +249,42 @@ class EmailRoutingAgent:
                     email_data["attachments"], conditions["subject_contains"]
                 )
             
-            return subject_match or attachment_match
+            if subject_match:
+                return True, f"Subject contains account-related keywords: {conditions['subject_contains']}"
+            elif attachment_match:
+                return True, f"Attachment names contain account-related keywords"
+            return False, ""
         
-        # Rule 3: Domain-based routing
+        # Rule 3: Domain-based routing  
         if "from_domain" in conditions:
             from_domain = self.extract_from_domain(email_data["from"])
-            return from_domain == conditions["from_domain"]
+            if from_domain == conditions["from_domain"]:
+                return True, f"Email from Evergreen Line domain: {from_domain}"
+            return False, f"Domain {from_domain} does not match {conditions['from_domain']}"
         
         # Rule 4: RAFT Pre-Alert
         if "subject_contains" in conditions and rule["rule_id"] == 4:
-            return self.check_text_contains(email_data["subject"], conditions["subject_contains"])
+            if self.check_text_contains(email_data["subject"], conditions["subject_contains"]):
+                return True, f"Subject contains pre-alert keywords: {conditions['subject_contains']}"
+            return False, ""
         
         # Rule 5: RAFT Arrival Notice
         if "subject_or_body_contains" in conditions:
             keywords = conditions["subject_or_body_contains"]
             subject_match = self.check_text_contains(email_data["subject"], keywords)
             body_match = self.check_text_contains(email_data["body"], keywords)
-            return subject_match or body_match
+            
+            if subject_match:
+                return True, f"Subject contains arrival notice keywords: {keywords}"
+            elif body_match:
+                return True, f"Body contains arrival notice keywords: {keywords}"
+            return False, ""
         
         # Rule 1: Default rule
         if conditions.get("default", False):
-            return True
+            return True, "No specific rules matched, applying default routing"
         
-        return False
+        return False, ""
     
     def route_email(self, eml_content: str) -> Dict:
         """Main routing function"""
@@ -246,11 +294,17 @@ class EmailRoutingAgent:
                 raise Exception("Failed to parse email")
             
             for rule in self.routing_rules:
-                if self.apply_routing_rule(email_data, rule):
+                matched, reason = self.apply_routing_rule(email_data, rule)
+                if matched:
                     routing_result = {
                         "routing_queue": rule["queue"].value,
                         "rule_matched": rule["rule_id"],
                         "rule_description": rule["description"],
+                        "scenario": rule["scenario"],
+                        "action": rule["action"],
+                        "priority": rule["priority"],
+                        "sla": rule["sla"],
+                        "match_reason": reason,
                         "email_data": email_data,
                         "routing_timestamp": datetime.now().isoformat(),
                         "confidence": "HIGH" if rule["rule_id"] != 1 else "DEFAULT"
@@ -273,7 +327,8 @@ def extract_financial_data(email_body: str) -> Dict:
         "amounts": [],
         "currencies": [],
         "percentages": [],
-        "totals": []
+        "totals": [],
+        "budget_items": []
     }
     
     # Money pattern ($123, $1,234.56)
@@ -286,6 +341,11 @@ def extract_financial_data(email_body: str) -> Dict:
     percentages = re.findall(percentage_pattern, email_body)
     financial_data["percentages"] = percentages
     
+    # Budget line items
+    budget_pattern = r'([A-Za-z\s]+):\s*\$[\d,]+\.?\d*'
+    budget_items = re.findall(budget_pattern, email_body)
+    financial_data["budget_items"] = budget_items
+    
     return financial_data
 
 def extract_entities(email_content: str) -> Dict:
@@ -295,7 +355,10 @@ def extract_entities(email_content: str) -> Dict:
         "phones": [],
         "dates": [],
         "companies": [],
-        "amounts": []
+        "amounts": [],
+        "account_numbers": [],
+        "container_numbers": [],
+        "booking_refs": []
     }
     
     # Email pattern
@@ -306,7 +369,7 @@ def extract_entities(email_content: str) -> Dict:
     phone_pattern = r'\+?1?[-.\s]?\(?[0-9]{3}\)?[-.\s]?[0-9]{3}[-.\s]?[0-9]{4}'
     entities["phones"] = re.findall(phone_pattern, email_content)
     
-    # Date pattern (simple)
+    # Date pattern
     date_pattern = r'\b(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]* \d{1,2},? \d{4}\b'
     entities["dates"] = re.findall(date_pattern, email_content, re.IGNORECASE)
     
@@ -314,18 +377,33 @@ def extract_entities(email_content: str) -> Dict:
     amount_pattern = r'\$[\d,]+\.?\d*'
     entities["amounts"] = re.findall(amount_pattern, email_content)
     
+    # Account number pattern
+    account_pattern = r'(?:Account|ID|Customer)\s*[#:]?\s*([A-Z0-9-]+)'
+    entities["account_numbers"] = re.findall(account_pattern, email_content, re.IGNORECASE)
+    
+    # Container number pattern
+    container_pattern = r'\b[A-Z]{4}\s?\d{6,7}\s?\d\b'
+    entities["container_numbers"] = re.findall(container_pattern, email_content)
+    
+    # Booking reference pattern
+    booking_pattern = r'(?:Booking|B/L|BL)\s*[#:]?\s*([A-Z0-9]+)'
+    entities["booking_refs"] = re.findall(booking_pattern, email_content, re.IGNORECASE)
+    
     return entities
 
 def analyze_sentiment(email_content: str) -> Dict:
-    """Simple sentiment analysis"""
-    positive_words = ['thanks', 'appreciate', 'excellent', 'great', 'pleased', 'happy', 'satisfied']
-    negative_words = ['urgent', 'frustrated', 'angry', 'disappointed', 'unacceptable', 'complaint', 'issue', 'problem']
+    """Enhanced sentiment analysis"""
+    positive_words = ['thanks', 'appreciate', 'excellent', 'great', 'pleased', 'happy', 'satisfied', 'good', 'wonderful']
+    negative_words = ['urgent', 'frustrated', 'angry', 'disappointed', 'unacceptable', 'complaint', 'issue', 'problem', 'error', 'wrong', 'terrible', 'awful']
+    urgency_words = ['urgent', 'asap', 'immediately', 'critical', 'emergency', 'deadline', 'overdue']
     
     content_lower = email_content.lower()
     
     positive_count = sum(1 for word in positive_words if word in content_lower)
     negative_count = sum(1 for word in negative_words if word in content_lower)
+    urgency_count = sum(1 for word in urgency_words if word in content_lower)
     
+    # Determine sentiment
     if negative_count > positive_count:
         sentiment = "Negative"
         score = -1
@@ -336,11 +414,21 @@ def analyze_sentiment(email_content: str) -> Dict:
         sentiment = "Neutral"
         score = 0
     
+    # Determine urgency
+    if urgency_count >= 2:
+        urgency = "Critical"
+    elif urgency_count == 1:
+        urgency = "High"
+    else:
+        urgency = "Normal"
+    
     return {
         "sentiment": sentiment,
         "score": score,
+        "urgency": urgency,
         "positive_indicators": positive_count,
-        "negative_indicators": negative_count
+        "negative_indicators": negative_count,
+        "urgency_indicators": urgency_count
     }
 
 def claude_analysis(email_content: str, api_key: str) -> str:
@@ -349,22 +437,47 @@ def claude_analysis(email_content: str, api_key: str) -> str:
         import anthropic
         client = anthropic.Anthropic(api_key=api_key)
         
-        prompt = f"""Analyze this email and provide:
-1. Email type classification
-2. Sentiment analysis (positive/negative/neutral)
-3. Urgency level (low/medium/high/critical)
-4. Key information summary
-5. Recommended actions
-6. Business impact assessment
+        prompt = f"""Analyze this email comprehensively and provide actionable insights:
+
+1. **BUSINESS SCENARIO CLASSIFICATION:**
+   - What type of business scenario is this?
+   - What industry/domain does it relate to?
+
+2. **PRIORITY & URGENCY ASSESSMENT:**
+   - Priority level (Critical/High/Medium/Low)
+   - Required response time
+   - Business impact assessment
+
+3. **KEY INFORMATION EXTRACTION:**
+   - Important dates and deadlines
+   - Financial information (amounts, budgets, costs)
+   - Key stakeholders and contacts
+   - Account/reference numbers
+
+4. **RECOMMENDED ACTIONS:**
+   - Immediate actions required
+   - Follow-up tasks needed
+   - Who should be notified
+   - Timeline for completion
+
+5. **RISK ASSESSMENT:**
+   - Potential risks or concerns
+   - Compliance considerations
+   - Customer satisfaction impact
+
+6. **NEXT STEPS:**
+   - Specific actionable steps
+   - Resource requirements
+   - Success criteria
 
 Email content:
 {email_content}
 
-Provide a structured analysis in markdown format."""
+Provide a structured, actionable analysis that a business user can immediately act upon."""
         
         message = client.messages.create(
             model="claude-3-sonnet-20240229",
-            max_tokens=1500,
+            max_tokens=2000,
             temperature=0,
             messages=[{"role": "user", "content": prompt}]
         )
@@ -372,13 +485,24 @@ Provide a structured analysis in markdown format."""
         return message.content[0].text
         
     except Exception as e:
-        return f"Error in Claude analysis: {str(e)}"
+        return f"❌ **Error in Claude analysis:** {str(e)}\n\n**Possible solutions:**\n- Check your API key format (should start with 'sk-ant-')\n- Verify your API key is active\n- Ensure you have API credits available"
 
-def create_download_link(content: str, filename: str, text: str) -> str:
-    """Create download link for content"""
-    b64 = base64.b64encode(content.encode()).decode()
-    href = f'<a href="data:text/plain;base64,{b64}" download="{filename}">{text}</a>'
-    return href
+def get_api_key():
+    """Get API key from environment or user input"""
+    # Check environment variable first
+    env_key = os.getenv('ANTHROPIC_API_KEY')
+    if env_key and env_key != "skooooo":  # Ignore placeholder
+        return env_key
+    
+    # Get from sidebar
+    api_key = st.sidebar.text_input(
+        "Claude API Key", 
+        type="password", 
+        help="Enter your Anthropic Claude API key (starts with sk-ant-)",
+        placeholder="sk-ant-..."
+    )
+    
+    return api_key
 
 def main():
     # Header
@@ -393,20 +517,28 @@ def main():
     
     # Sidebar
     st.sidebar.header("🔧 Configuration")
-    api_key = st.sidebar.text_input("Claude API Key", type="password", help="Enter your Anthropic Claude API key for AI analysis")
+    
+    # API Key handling
+    api_key = get_api_key()
+    
+    if api_key:
+        if api_key.startswith('sk-ant-'):
+            st.sidebar.success("✅ Valid API key format")
+        else:
+            st.sidebar.error("❌ API key should start with 'sk-ant-'")
     
     st.sidebar.markdown("---")
     st.sidebar.markdown("### 📋 Routing Rules")
     st.sidebar.markdown("""
-    **Rule 1:** Default → Shipment_Initiation_Brkg_Inland_SI
+    **Rule 1:** Default → Shipment_Initiation_Brkg_Inland_SI *(24h SLA)*
     
-    **Rule 2:** Account Inquiry → Account_Inquiry_US
+    **Rule 2:** Account Inquiry → Account_Inquiry_US *(4h SLA)*
     
-    **Rule 3:** Evergreen Line → ORD_SI-Non_UPS_Shipments
+    **Rule 3:** Evergreen Line → ORD_SI-Non_UPS_Shipments *(8h SLA)*
     
-    **Rule 4:** RAFT Pre-Alert → RAFT_PreAlert
+    **Rule 4:** RAFT Pre-Alert → RAFT_PreAlert *(2h SLA)*
     
-    **Rule 5:** RAFT Arrival → RAFT_ArrivalNotice
+    **Rule 5:** RAFT Arrival → RAFT_ArrivalNotice *(1h SLA)*
     """)
     
     # Initialize routing agent
@@ -439,19 +571,31 @@ def main():
             if routing_result:
                 email_data = routing_result['email_data']
                 
-                # Display routing result
+                # Display routing result with clear scenario
                 st.markdown(f"""
                 <div class="routing-result">
-                    <h3>🎯 Routing Decision</h3>
-                    <p><strong>Queue:</strong> {routing_result['routing_queue']}</p>
-                    <p><strong>Rule:</strong> {routing_result['rule_matched']} - {routing_result['rule_description']}</p>
-                    <p><strong>Confidence:</strong> {routing_result['confidence']}</p>
-                    <p><strong>Processed:</strong> {routing_result['routing_timestamp']}</p>
+                    <h3>🎯 ROUTING DECISION</h3>
+                    <p><strong>📋 SCENARIO:</strong> {routing_result['scenario']}</p>
+                    <p><strong>🏷️ QUEUE:</strong> {routing_result['routing_queue']}</p>
+                    <p><strong>⚡ PRIORITY:</strong> {routing_result['priority']}</p>
+                    <p><strong>⏰ SLA:</strong> {routing_result['sla']}</p>
+                    <p><strong>✅ RULE:</strong> Rule {routing_result['rule_matched']} - {routing_result['rule_description']}</p>
+                    <p><strong>🔍 MATCH REASON:</strong> {routing_result['match_reason']}</p>
+                </div>
+                """, unsafe_allow_html=True)
+                
+                # Action recommendations
+                st.markdown(f"""
+                <div class="action-box">
+                    <h3>🎯 RECOMMENDED ACTION</h3>
+                    <p><strong>{routing_result['action']}</strong></p>
+                    <p><strong>📅 Response Required By:</strong> {routing_result['sla']} from now</p>
+                    <p><strong>🔔 Next Steps:</strong> Assign to {routing_result['routing_queue']} team for processing</p>
                 </div>
                 """, unsafe_allow_html=True)
                 
                 # Email details tabs
-                tab1, tab2, tab3, tab4 = st.tabs(["📧 Email Details", "📊 Analysis", "🤖 AI Analysis", "📥 Export"])
+                tab1, tab2, tab3, tab4 = st.tabs(["📧 Email Details", "📊 Smart Analysis", "🤖 AI Analysis", "📥 Export"])
                 
                 with tab1:
                     st.subheader("Email Information")
@@ -472,127 +616,150 @@ def main():
                     
                     st.subheader("Email Body")
                     if email_data.get('is_html'):
-                        st.markdown("*HTML content detected*")
-                        with st.expander("View Raw HTML"):
-                            st.code(email_data.get('body', ''), language='html')
-                    else:
-                        st.text_area("Email Content", email_data.get('body', ''), height=300)
+                        st.markdown("*HTML content detected - showing cleaned text*")
+                    
+                    # Show email body in scrollable box
+                    body_text = email_data.get('body', '')[:2000]  # Limit display
+                    st.text_area("Email Content", body_text, height=300, disabled=True)
                 
                 with tab2:
-                    st.subheader("📊 Automated Analysis")
+                    st.subheader("📊 Smart Analysis")
                     
                     # Entity extraction
-                    entities = extract_entities(email_data.get('body', '') + ' ' + email_data.get('subject', ''))
+                    full_content = email_data.get('body', '') + ' ' + email_data.get('subject', '')
+                    entities = extract_entities(full_content)
+                    financial_data = extract_financial_data(full_content)
                     
+                    # Key metrics
+                    col_met1, col_met2, col_met3 = st.columns(3)
+                    col_met1.metric("📧 Email Addresses", len(entities['emails']))
+                    col_met2.metric("💰 Amounts Found", len(entities['amounts']))
+                    col_met3.metric("📅 Dates Found", len(entities['dates']))
+                    
+                    # Entity details
                     col_x, col_y = st.columns(2)
                     with col_x:
-                        st.markdown("**📧 Email Addresses Found:**")
-                        for email_addr in entities['emails']:
-                            st.write(f"• {email_addr}")
+                        if entities['emails']:
+                            st.markdown("**📧 Email Addresses:**")
+                            for email_addr in entities['emails'][:5]:  # Limit display
+                                st.write(f"• {email_addr}")
                         
-                        st.markdown("**📞 Phone Numbers Found:**")
-                        for phone in entities['phones']:
-                            st.write(f"• {phone}")
+                        if entities['phones']:
+                            st.markdown("**📞 Phone Numbers:**")
+                            for phone in entities['phones'][:5]:
+                                st.write(f"• {phone}")
+                        
+                        if entities['account_numbers']:
+                            st.markdown("**🔢 Account Numbers:**")
+                            for acc in entities['account_numbers'][:5]:
+                                st.write(f"• {acc}")
                     
                     with col_y:
-                        st.markdown("**📅 Dates Found:**")
-                        for date in entities['dates']:
-                            st.write(f"• {date}")
+                        if entities['dates']:
+                            st.markdown("**📅 Important Dates:**")
+                            for date in entities['dates'][:5]:
+                                st.write(f"• {date}")
                         
-                        st.markdown("**💰 Amounts Found:**")
-                        for amount in entities['amounts']:
-                            st.write(f"• {amount}")
+                        if entities['amounts']:
+                            st.markdown("**💰 Financial Amounts:**")
+                            for amount in entities['amounts'][:5]:
+                                st.write(f"• {amount}")
+                        
+                        if entities['container_numbers']:
+                            st.markdown("**📦 Container Numbers:**")
+                            for container in entities['container_numbers'][:5]:
+                                st.write(f"• {container}")
                     
                     # Sentiment analysis
-                    sentiment_data = analyze_sentiment(email_data.get('body', '') + ' ' + email_data.get('subject', ''))
+                    sentiment_data = analyze_sentiment(full_content)
                     
-                    st.markdown("**😊 Sentiment Analysis:**")
-                    col_sent1, col_sent2, col_sent3 = st.columns(3)
+                    st.markdown("**😊 Sentiment & Urgency Analysis:**")
+                    col_sent1, col_sent2, col_sent3, col_sent4 = st.columns(4)
                     col_sent1.metric("Sentiment", sentiment_data['sentiment'])
-                    col_sent2.metric("Positive Indicators", sentiment_data['positive_indicators'])
-                    col_sent3.metric("Negative Indicators", sentiment_data['negative_indicators'])
+                    col_sent2.metric("Urgency Level", sentiment_data['urgency'])
+                    col_sent3.metric("Positive Signals", sentiment_data['positive_indicators'])
+                    col_sent4.metric("Negative Signals", sentiment_data['negative_indicators'])
                 
                 with tab3:
-                    st.subheader("🤖 Claude AI Analysis")
+                    st.subheader("🤖 Claude AI Deep Analysis")
                     
-                    # FIXED BUTTON LOGIC - No more syntax errors!
                     if st.button("🚀 Analyze with Claude AI", type="primary"):
                         if not api_key:
-                            st.warning("🔑 Please enter Claude API key in sidebar")
-                        elif not email_data.get('body'):
-                            st.warning("📧 No email content to analyze")
+                            st.warning("🔑 Please enter Claude API key in sidebar or set ANTHROPIC_API_KEY environment variable")
+                        elif not api_key.startswith('sk-ant-'):
+                            st.error("❌ Invalid API key format. Claude API keys start with 'sk-ant-'")
                         else:
                             with st.spinner("🧠 Analyzing with Claude AI..."):
-                                try:
-                                    email_content = f"""
-                                    From: {email_data.get('from', 'N/A')}
-                                    To: {email_data.get('to', 'N/A')}
-                                    Subject: {email_data.get('subject', 'N/A')}
-                                    Date: {email_data.get('date', 'N/A')}
-                                    
-                                    Body:
-                                    {email_data.get('body', 'N/A')}
-                                    """
-                                    
-                                    analysis = claude_analysis(email_content, api_key)
-                                    st.success("✅ Claude AI Analysis Complete!")
-                                    st.markdown("### 🤖 AI Analysis Results")
-                                    st.markdown(analysis)
-                                    
-                                    # Store analysis in session state for export
-                                    if 'claude_analysis' not in st.session_state:
-                                        st.session_state.claude_analysis = {}
-                                    st.session_state.claude_analysis[uploaded_file.name] = analysis
-                                    
-                                except Exception as e:
-                                    st.error(f"❌ Error with Claude AI analysis: {str(e)}")
-                                    st.info("💡 Please check your API key and try again")
-                    
-                    # Alternative: Show analysis from session state if exists
-                    if 'claude_analysis' in st.session_state and uploaded_file and uploaded_file.name in st.session_state.claude_analysis:
-                        st.markdown("### 🤖 Previous AI Analysis")
-                        with st.expander("View Previous Analysis", expanded=False):
-                            st.markdown(st.session_state.claude_analysis[uploaded_file.name])
+                                email_content = f"""
+                                From: {email_data.get('from', 'N/A')}
+                                To: {email_data.get('to', 'N/A')}
+                                Subject: {email_data.get('subject', 'N/A')}
+                                Date: {email_data.get('date', 'N/A')}
+                                Routing Decision: {routing_result['scenario']} → {routing_result['routing_queue']}
+                                
+                                Body:
+                                {email_data.get('body', 'N/A')}
+                                """
+                                
+                                analysis = claude_analysis(email_content, api_key)
+                                st.markdown("### 🤖 AI Analysis Results")
+                                st.markdown(analysis)
                 
                 with tab4:
                     st.subheader("📥 Export Results")
                     
-                    # Prepare export data
+                    # Prepare comprehensive export data
                     export_data = {
-                        "routing_result": routing_result,
+                        "routing_decision": {
+                            "queue": routing_result['routing_queue'],
+                            "rule": routing_result['rule_matched'],
+                            "scenario": routing_result['scenario'],
+                            "action": routing_result['action'],
+                            "priority": routing_result['priority'],
+                            "sla": routing_result['sla'],
+                            "match_reason": routing_result['match_reason']
+                        },
+                        "email_metadata": {
+                            "from": email_data.get('from'),
+                            "to": email_data.get('to'),
+                            "subject": email_data.get('subject'),
+                            "date": email_data.get('date'),
+                            "attachments": email_data.get('attachments', [])
+                        },
                         "entities": entities,
                         "sentiment": sentiment_data,
-                        "timestamp": datetime.now().isoformat()
+                        "financial_data": financial_data,
+                        "processing_timestamp": datetime.now().isoformat()
                     }
                     
                     export_json = json.dumps(export_data, indent=2)
                     
                     st.download_button(
-                        label="📋 Download Analysis as JSON",
+                        label="📋 Download Complete Analysis (JSON)",
                         data=export_json,
                         file_name=f"email_analysis_{datetime.now().strftime('%Y%m%d_%H%M%S')}.json",
                         mime="application/json"
                     )
                     
                     # CSV export for entities
-                    if entities['emails'] or entities['phones'] or entities['amounts']:
-                        entity_df = pd.DataFrame({
-                            'Type': ['Email'] * len(entities['emails']) + 
-                                   ['Phone'] * len(entities['phones']) + 
-                                   ['Amount'] * len(entities['amounts']),
-                            'Value': entities['emails'] + entities['phones'] + entities['amounts']
-                        })
+                    if any(entities.values()):
+                        rows = []
+                        for entity_type, entity_list in entities.items():
+                            for entity in entity_list:
+                                rows.append({"Type": entity_type, "Value": entity})
                         
-                        csv = entity_df.to_csv(index=False)
-                        st.download_button(
-                            label="📊 Download Entities as CSV",
-                            data=csv,
-                            file_name=f"email_entities_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
-                            mime="text/csv"
-                        )
+                        if rows:
+                            entity_df = pd.DataFrame(rows)
+                            csv = entity_df.to_csv(index=False)
+                            st.download_button(
+                                label="📊 Download Entities (CSV)",
+                                data=csv,
+                                file_name=f"email_entities_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                                mime="text/csv"
+                            )
     
     with col2:
-        st.header("📊 Statistics")
+        st.header("📊 System Dashboard")
         
         # Routing statistics
         stats = agent.routing_stats
@@ -609,22 +776,27 @@ def main():
                 fig = px.pie(
                     values=list(queue_data.values()),
                     names=list(queue_data.keys()),
-                    title="Email Routing Distribution"
+                    title="Email Routing Distribution",
+                    color_discrete_sequence=px.colors.qualitative.Set3
                 )
                 st.plotly_chart(fig, use_container_width=True)
         
         st.markdown("---")
-        st.subheader("🔧 System Info")
+        st.subheader("🔧 System Configuration")
         st.markdown(f"**Team Mailbox:** {agent.team_mailbox}")
         st.markdown(f"**Distribution List:** {agent.distribution_list}")
-        st.markdown(f"**Rules Configured:** {len(agent.routing_rules)}")
+        st.markdown(f"**Rules Active:** {len(agent.routing_rules)}")
         
-        # Quick test section
+        # Rule summary
         st.markdown("---")
-        st.subheader("🧪 Quick Test")
-        
-        if st.button("Test Sample Emails"):
-            st.info("Feature coming soon - test with predefined email samples")
+        st.subheader("📋 Rule Summary")
+        for rule in agent.routing_rules:
+            st.markdown(f"""
+            <div class="rule-box">
+                <strong>Rule {rule['rule_id']}:</strong> {rule['scenario']}<br>
+                <strong>Priority:</strong> {rule['priority']} | <strong>SLA:</strong> {rule['sla']}
+            </div>
+            """, unsafe_allow_html=True)
 
 if __name__ == "__main__":
     main()
