@@ -14,7 +14,7 @@ from io import BytesIO
 
 # Page config
 st.set_page_config(
-    page_title="UPS Email Processing System",
+    page_title="UPS Brokerage Email Automation Manager (BEAM),
     page_icon="📧",
     layout="wide",
     initial_sidebar_state="expanded"
@@ -798,3 +798,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
