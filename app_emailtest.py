@@ -619,7 +619,7 @@ def main():
                 """, unsafe_allow_html=True)
                 
                 # Email details tabs
-                tab1, tab2, tab3, tab4 = st.tabs(["📧 Email Details", "📊 Smart Analysis", "🧠 AI Analysis", "📥 Export"])
+                tab1, tab2, tab3, tab4 = st.tabs(["📧 Email Details", "📊 Smart Analysis", "  AI Analysis", "📥 Export"])
                 
                 with tab1:
                     st.subheader("Email Information")
@@ -705,14 +705,14 @@ def main():
                     col_sent4.metric("Negative Signals", sentiment_data['negative_indicators'])
                 
                 with tab3:
-                    st.subheader("🧠 Comprehensive Analysis")
+                    st.subheader("  Comprehensive Analysis")
                     
                     if not api_key:
                         st.warning("🔑 Please enter API key in sidebar to enable advanced analysis")
                     elif not api_key.startswith('sk-ant-'):
                         st.error("❌ Invalid API key format. API keys should start with 'sk-ant-'")
                     else:
-                        with st.spinner("🧠 Analyzing..."):
+                        with st.spinner("  Analyzing..."):
                             email_content = f"""
                             From: {email_data.get('from', 'N/A')}
                             To: {email_data.get('to', 'N/A')}
@@ -822,3 +822,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
